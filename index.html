@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Friend Upload</title>
+<!-- PeerJS: WebRTC helper. Its public server only introduces the two devices;
+     files then travel directly between them, encrypted (DTLS) by the browser. -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #ffffff; --text: #1a1e23; --muted: #67717d;
+    --line: #e2e5e9; --accent: #3a6df0; --accent-text: #ffffff; --accent-soft: #e9efff;
+    --ok: #1d9a54; --warn: #c27c0e; --bad: #d14343; --track: #e8ebef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101316; --card: #191d22; --text: #e7eaee; --muted: #98a2ad;
+      --line: #2a3038; --accent: #5d8bff; --accent-text: #0d1220; --accent-soft: #1d2740;
+      --ok: #3acb78; --warn: #e3a43a; --bad: #ff6b6b; --track: #262c33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; }
+  header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); text-align: right; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .code { font: 600 34px/1.1 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .08em; margin: 2px 0 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .grow { flex: 1 1 160px; min-width: 0; }
+  input[type=text] {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  input.codein { font-family: ui-monospace, Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+  button {
+    font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); cursor: pointer;
+  }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  label.field { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .saved li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .saved li:first-child { margin-top: 12px; }
+  .saved .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .friend-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .friend-head strong { font-size: 16px; }
+  .pill { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--track); color: var(--muted); white-space: nowrap; }
+  .pill.ok { background: var(--accent-soft); color: var(--accent); }
+  .drop {
+    border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted);
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop button { margin-top: 8px; }
+  .transfers li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .transfers li:first-child { margin-top: 12px; }
+  .tline { display: flex; gap: 8px; align-items: baseline; }
+  .tname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .tdir { color: var(--muted); flex: none; }
+  .bar { height: 6px; background: var(--track); border-radius: 99px; overflow: hidden; margin: 6px 0 4px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .bar.done > div { background: var(--ok); } .bar.bad > div { background: var(--bad); }
+  .tfoot { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 18px 0 4px; }
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100% - 32px);
+    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>Friend Upload</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Starting…</span></div>
+  </header>
+
+  <section class="card">
+    <h2>Your code</h2>
+    <div class="code" id="mycode">···-···</div>
+    <div class="row">
+      <button id="copyCode">Copy code</button>
+      <button id="copyLink" hidden>Copy invite link</button>
+    </div>
+    <label class="field" for="myname">Your name (shown to friends)</label>
+    <input type="text" id="myname" maxlength="40" placeholder="e.g. Abel">
+  </section>
+
+  <section class="card">
+    <h2>Connect to a friend</h2>
+    <form class="row" id="connectForm">
+      <input type="text" class="codein grow" id="friendCode" maxlength="9" placeholder="ABC-123" autocomplete="off" autocapitalize="characters">
+      <button class="primary" type="submit">Connect</button>
+    </form>
+    <p class="hint">Both of you need the app open. Files go straight from device to device, encrypted, and are never stored on a server.</p>
+    <ul class="saved" id="saved"></ul>
+  </section>
+
+  <section id="friends"></section>
+  <div class="empty" id="empty">No one connected yet.</div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+const PREFIX = 'friendupload-v1-';      // namespace on the public PeerJS server
+const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L mix-ups
+const CHUNK = 16 * 1024;                 // safe message size for every browser
+const READ_BLOCK = 1024 * 1024;          // read files from disk 1 MB at a time
+const HIGH_WATER = 1024 * 1024;          // pause sending while this much is queued
+
+// ---------- small helpers ----------
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat()) if (kid != null) el.append(kid); // strings become text nodes (safe)
+  return el;
+}
+function randomCode(n = 6) {
+  const a = new Uint32Array(n); crypto.getRandomValues(a);
+  return Array.from(a, x => ALPHABET[x % ALPHABET.length]).join('');
+}
+const normalize = s => String(s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const pretty = c => c.length === 6 ? c.slice(0, 3) + '-' + c.slice(3) : c;
+function fmtSize(b) {
+  const u = ['B', 'KB', 'MB', 'GB']; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i ? b.toFixed(1) : b) + ' ' + u[i];
+}
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+function setStatus(msg, kind = '') {
+  $('status').textContent = msg;
+  $('dot').className = 'dot ' + kind;
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = h('textarea'); ta.value = text; document.body.append(ta); ta.select();
+    try { document.execCommand('copy'); } catch {} ta.remove();
+  }
+  toast('Copied');
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- state ----------
+let peer = null;
+let myCode = '';
+let myName = store.get('name', '');
+const friends = new Map();   // code -> friend object
+
+// ---------- peer / signalling ----------
+function startPeer(code, temporary) {
+  myCode = code;
+  let dead = false;
+  const p = peer = new Peer(PREFIX + code, { debug: 1 });
+  $('mycode').textContent = pretty(code);
+  setStatus('Going online…');
+
+  p.on('open', () => {
+    setStatus(temporary ? 'Online (temporary code)' : 'Online', 'ok');
+    if (temporary) toast('Your usual code is open in another tab, so this tab got a temporary one.');
+    connectFromHash();
+  });
+  p.on('connection', conn => setupConn(conn));
+  p.on('disconnected', () => {
+    if (dead) return;
+    setStatus('Reconnecting…');
+    setTimeout(() => { if (!p.destroyed) p.reconnect(); }, 2000);
+  });
+  p.on('error', err => {
+    if (err.type === 'unavailable-id' && !temporary) {
+      dead = true; p.destroy(); startPeer(randomCode(), true); return;
+    }
+    if (err.type === 'peer-unavailable') {
+      const m = /friendupload-v1-([A-Z0-9]+)/.exec(err.message || '');
+      const f = m && friends.get(m[1]);
+      toast(`${f ? f.name : 'That friend'} isn't online right now.`);
+      if (f && f.state !== 'open') removeFriend(f);
+      return;
+    }
+    if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type)) {
+      setStatus("Can't reach the matchmaking server", 'bad'); return;
+    }
+    if (err.type === 'browser-incompatible') { setStatus('This browser is not supported', 'bad'); return; }
+    toast('Error: ' + (err.message || err.type));
+  });
+}
+
+function connectFromHash() {
+  const code = normalize(location.hash.slice(1));
+  if (code.length === 6) {
+    history.replaceState(null, '', location.pathname + location.search);
+    connectTo(code);
+  }
+}
+
+function connectTo(raw) {
+  const code = normalize(raw);
+  if (code.length !== 6) { toast('Codes are 6 characters, like ABC-123.'); return; }
+  if (code === myCode) { toast("That's your own code."); return; }
+  if (!peer || !peer.open) { toast('Still going online, try again in a second.'); return; }
+  const f = friends.get(code);
+  if (f && (f.state === 'open' || f.state === 'connecting')) { f.el.scrollIntoView({ behavior: 'smooth' }); return; }
+  setupConn(peer.connect(PREFIX + code, { reliable: true, serialization: 'raw' }));
+}
+
+// ---------- connections ----------
+function getFriend(code) {
+  let f = friends.get(code);
+  if (!f) {
+    const saved = store.get('friends', []).find(s => s.code === code);
+    f = { code, name: saved ? saved.name : pretty(code), conn: null, state: 'connecting',
+          out: new Map(), inc: new Map(), queue: [], sending: false, current: null,
+          chain: Promise.resolve(), el: null };
+    friends.set(code, f);
+    buildFriendCard(f);
+  }
+  return f;
+}
+
+function setupConn(conn) {
+  const code = conn.peer.slice(PREFIX.length);
+  const f = getFriend(code);
+  if (f.conn && f.conn !== conn) { const old = f.conn; f.conn = null; old.close(); failActive(f); }
+  f.conn = conn; f.state = 'connecting'; renderFriend(f);
+
+  conn.on('open', () => {
+    if (f.conn !== conn) return;
+    if (conn.dataChannel) conn.dataChannel.binaryType = 'arraybuffer';
+    f.state = 'open';
+    sendMsg(f, { t: 'hello', name: myName });
+    renderFriend(f);
+  });
+  // Process messages strictly in order (a Blob conversion must not let later messages overtake it).
+  conn.on('data', d => { f.chain = f.chain.then(() => onData(f, d)).catch(e => console.error(e)); });
+  conn.on('close', () => {
+    if (f.conn !== conn) return;
+    f.state = 'closed'; failActive(f); renderFriend(f);
+  });
+  conn.on('error', e => console.warn('connection error', e));
+}
+
+function sendMsg(f, msg) { if (f.conn && f.conn.open) f.conn.send(JSON.stringify(msg)); }
+
+async function onData(f, d) {
+  if (typeof d === 'string') {
+    let m; try { m = JSON.parse(d); } catch { return; }
+    handleMsg(f, m); return;
+  }
+  if (d instanceof Blob) d = await d.arrayBuffer();
+  if (!(d instanceof ArrayBuffer) && !ArrayBuffer.isView(d)) return;
+  const item = f.current;
+  if (!item) return;
+  item.parts.push(d);
+  item.done += d.byteLength;
+  updateItem(item);
+}
+
+function handleMsg(f, m) {
+  switch (m.t) {
+    case 'hello': {
+      f.name = String(m.name || '').slice(0, 40).trim() || pretty(f.code);
+      const saved = store.get('friends', []);
+      const s = saved.find(x => x.code === f.code);
+      if (s && s.name !== f.name) { s.name = f.name; store.set('friends', saved); renderSaved(); }
+      renderFriend(f); break;
+    }
+    case 'offer': {   // friend wants to send us a file
+      const size = Number(m.size);
+      if (typeof m.id !== 'string' || !Number.isFinite(size) || size < 0) return;
+      const item = { id: m.id, dir: 'in', name: String(m.name || 'file').slice(0, 200),
+                     mime: String(m.mime || ''), size, done: 0, parts: [], status: 'offered', el: null };
+      f.inc.set(item.id, item); addItem(f, item); break;
+    }
+    case 'accept': {
+      const item = f.out.get(m.id);
+      if (item && item.status === 'waiting') { item.status = 'queued'; updateItem(item); f.queue.push(item); pump(f); }
+      break;
+    }
+    case 'decline': {
+      const item = f.out.get(m.id);
+      if (item && item.status === 'waiting') { item.status = 'declined'; updateItem(item); }
+      break;
+    }
+    case 'start': {
+      const item = f.inc.get(m.id);
+      if (item && item.status === 'accepted') { item.status = 'receiving'; f.current = item; updateItem(item); }
+      break;
+    }
+    case 'end': {
+      const item = f.inc.get(m.id);
+      if (!item || f.current !== item) return;
+      f.current = null;
+      if (item.done !== item.size) { item.status = 'failed'; item.parts = []; updateItem(item); return; }
+      item.blob = new Blob(item.parts, { type: item.mime || 'application/octet-stream' });
+      item.parts = []; item.status = 'received'; updateItem(item);
+      toast(`Received ${item.name}`);
+      break;
+    }
+  }
+}
+
+function sendFiles(f, files) {
+  if (f.state !== 'open') { toast('Not connected.'); return; }
+  for (const file of files) {
+    const item = { id: randomCode(12), dir: 'out', name: file.name, size: file.size, file, done: 0, status: 'waiting', el: null };
+    f.out.set(item.id, item); addItem(f, item);
+    sendMsg(f, { t: 'offer', id: item.id, name: file.name, size: file.size, mime: file.type });
+  }
+}
+
+// Send accepted files one at a time, in chunks, without flooding the connection.
+async function pump(f) {
+  if (f.sending) return;
+  f.sending = true;
+  let item = null;
+  try {
+    while (f.queue.length) {
+      const conn = f.conn;
+      item = f.queue.shift();
+      item.status = 'sending'; updateItem(item);
+      conn.send(JSON.stringify({ t: 'start', id: item.id }));
+      for (let off = 0; off < item.size; off += READ_BLOCK) {
+        const block = await item.file.slice(off, off + READ_BLOCK).arrayBuffer();
+        for (let i = 0; i < block.byteLength; i += CHUNK) {
+          while (conn.open && (conn.dataChannel.bufferedAmount > HIGH_WATER || conn.bufferSize > 0)) await sleep(10);
+          if (f.conn !== conn || !conn.open) throw new Error('connection closed');
+          conn.send(block.slice(i, i + CHUNK));
+          item.done = Math.min(item.size, off + i + CHUNK);
+          updateItem(item);
+        }
+      }
+      conn.send(JSON.stringify({ t: 'end', id: item.id }));
+      item.status = 'sent'; item.done = item.size; updateItem(item);
+      item = null;
+    }
+  } catch (e) {
+    if (item) { item.status = 'failed'; updateItem(item); }
+  } finally {
+    f.sending = false;
+  }
+}
+
+function failActive(f) {
+  for (const it of f.out.values()) if (['waiting', 'queued', 'sending'].includes(it.status)) { it.status = 'failed'; updateItem(it); }
+  for (const it of f.inc.values()) if (['offered', 'accepted', 'receiving'].includes(it.status)) { it.status = 'failed'; it.parts = []; updateItem(it); }
+  f.queue = []; f.current = null;
+}
+
+function removeFriend(f) {
+  failActive(f);
+  if (f.conn) { const c = f.conn; f.conn = null; c.close(); }
+  f.el.remove(); friends.delete(f.code); updateEmpty();
+}
+
+// ---------- UI: friend cards ----------
+function buildFriendCard(f) {
+  const fileInput = h('input', { type: 'file', multiple: true, hidden: true, onchange: () => { sendFiles(f, fileInput.files); fileInput.value = ''; } });
+  const drop = h('div', { class: 'drop' }, 'Drop files here', h('br'), h('button', { class: 'primary', onclick: () => fileInput.click() }, 'Choose files'), fileInput);
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); sendFiles(f, e.dataTransfer.files); });
+
+  f.ui = {
+    name: h('strong'), code: h('span', { class: 'muted' }), pill: h('span', { class: 'pill' }),
+    drop, list: h('ul', { class: 'transfers' }),
+    save: h('button', { class: 'small', onclick: () => saveFriend(f) }, 'Save friend'),
+    reconnect: h('button', { class: 'small', onclick: () => { removeFriend(f); connectTo(f.code); } }, 'Reconnect'),
+    close: h('button', { class: 'small danger', onclick: () => removeFriend(f) }, 'Close'),
+  };
+  f.el = h('section', { class: 'card' },
+    h('div', { class: 'friend-head' }, h('div', {}, f.ui.name, ' ', f.ui.code), f.ui.pill),
+    f.ui.drop, f.ui.list,
+    h('div', { class: 'row', style: 'margin-top:12px' }, f.ui.save, f.ui.reconnect, f.ui.close));
+  $('friends').prepend(f.el);
+  renderFriend(f); updateEmpty();
+}
+
+function renderFriend(f) {
+  if (!f.ui) return;
+  f.ui.name.textContent = f.name;
+  f.ui.code.textContent = pretty(f.code);
+  const labels = { connecting: 'Connecting…', open: 'Connected', closed: 'Disconnected' };
+  f.ui.pill.textContent = labels[f.state];
+  f.ui.pill.className = 'pill' + (f.state === 'open' ? ' ok' : '');
+  f.ui.drop.hidden = f.state !== 'open';
+  f.ui.reconnect.hidden = f.state !== 'closed';
+  f.ui.save.hidden = store.get('friends', []).some(s => s.code === f.code);
+}
+
+function addItem(f, item) {
+  item.ui = { name: h('span', { class: 'tname' }), bar: h('div', { class: 'bar' }, h('div')),
+              info: h('span'), actions: h('span', { class: 'row' }) };
+  item.el = h('li', {},
+    h('div', { class: 'tline' }, h('span', { class: 'tdir' }, item.dir === 'out' ? '↑' : '↓'), item.ui.name),
+    item.ui.bar, h('div', { class: 'tfoot' }, item.ui.info, item.ui.actions));
+  item.friend = f;
+  f.ui.list.prepend(item.el);
+  updateItem(item, true);
+}
+
+const STATUS_TEXT = {
+  waiting: 'Waiting for them to accept', queued: 'Queued', sending: 'Sending', sent: 'Sent',
+  declined: 'Declined', failed: 'Failed (connection lost)',
+  offered: 'Wants to send you this', accepted: 'Starting…', receiving: 'Receiving', received: 'Received',
+};
+
+function updateItem(item, force) {
+  if (!item.ui) return;
+  // Progress updates arrive very often; repaint at most ~10x/second.
+  const now = performance.now();
+  const busy = item.status === 'sending' || item.status === 'receiving';
+  if (busy && !force && now - (item.painted || 0) < 100) return;
+  item.painted = now;
+
+  const u = item.ui, f = item.friend;
+  u.name.textContent = item.name;
+  const pct = item.size ? (item.done / item.size) * 100 : (['sent', 'received'].includes(item.status) ? 100 : 0);
+  u.bar.firstChild.style.width = pct + '%';
+  u.bar.className = 'bar' + (['sent', 'received'].includes(item.status) ? ' done' : '') + (['failed', 'declined'].includes(item.status) ? ' bad' : '');
+  u.info.textContent = `${STATUS_TEXT[item.status]} · ${busy ? fmtSize(item.done) + ' of ' : ''}${fmtSize(item.size)}`;
+
+  u.actions.replaceChildren();
+  if (item.status === 'offered') {
+    u.actions.append(
+      h('button', { class: 'small primary', onclick: () => { item.status = 'accepted'; updateItem(item); sendMsg(f, { t: 'accept', id: item.id }); } }, 'Accept'),
+      h('button', { class: 'small', onclick: () => { item.status = 'declined'; updateItem(item); sendMsg(f, { t: 'decline', id: item.id }); } }, 'Decline'));
+  } else if (item.status === 'received') {
+    u.actions.append(h('button', { class: 'small primary', onclick: () => saveBlob(item) }, 'Save'));
+  }
+}
+
+function saveBlob(item) {
+  const url = URL.createObjectURL(item.blob);
+  const a = h('a', { href: url, download: item.name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function updateEmpty() { $('empty').hidden = friends.size > 0; }
+
+// ---------- saved friends ----------
+function saveFriend(f) {
+  const saved = store.get('friends', []);
+  if (!saved.some(s => s.code === f.code)) saved.push({ code: f.code, name: f.name });
+  store.set('friends', saved); renderSaved(); renderFriend(f); toast(`Saved ${f.name}`);
+}
+function renderSaved() {
+  const saved = store.get('friends', []);
+  $('saved').replaceChildren(...saved.map(s => h('li', {},
+    h('span', { class: 'name' }, s.name, ' ', h('span', { class: 'muted' }, pretty(s.code))),
+    h('button', { class: 'small primary', onclick: () => connectTo(s.code) }, 'Connect'),
+    h('button', { class: 'small', title: 'Forget', onclick: () => {
+      store.set('friends', store.get('friends', []).filter(x => x.code !== s.code)); renderSaved();
+      const f = friends.get(s.code); if (f) renderFriend(f);
+    } }, '✕'))));
+}
+
+// ---------- wire up ----------
+$('myname').value = myName;
+$('myname').addEventListener('input', e => {
+  myName = e.target.value.trim(); store.set('name', myName);
+  for (const f of friends.values()) if (f.state === 'open') sendMsg(f, { t: 'hello', name: myName });
+});
+$('copyCode').onclick = () => copy(pretty(myCode));
+if (location.protocol.startsWith('http')) {
+  $('copyLink').hidden = false;
+  $('copyLink').onclick = () => copy(location.origin + location.pathname + '#' + myCode);
+}
+$('connectForm').addEventListener('submit', e => { e.preventDefault(); connectTo($('friendCode').value); $('friendCode').value = ''; });
+window.addEventListener('beforeunload', e => {
+  for (const f of friends.values())
+    for (const it of [...f.out.values(), ...f.inc.values()])
+      if (['sending', 'receiving', 'queued'].includes(it.status)) { e.preventDefault(); e.returnValue = ''; return; }
+});
+renderSaved();
+
+if (typeof Peer === 'undefined') {
+  setStatus('Could not load PeerJS (offline?)', 'bad');
+} else {
+  let code = store.get('code', '');
+  if (!/^[A-Z0-9]{6}$/.test(code)) { code = randomCode(); store.set('code', code); }
+  startPeer(code, false);
+}
+</script>
+</body>
+</html>
